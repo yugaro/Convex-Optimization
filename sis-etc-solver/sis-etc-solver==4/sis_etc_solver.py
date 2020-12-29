@@ -34,6 +34,7 @@ D = np.diag(np.sort((D_base_max - D_base_min) *
 # matrix of infection rates (air route matrix in case of the passengers and flights)
 B = pd.read_csv('./data/US_Airport_Ad_Matrix.csv',
                 index_col=0, nrows=n, usecols=[i for i in range(n + 1)]).values
+# B /= 1.48
 
 # maximum range of control paramter of recovery rate (K)
 bark_max = 8
@@ -63,8 +64,6 @@ def create_control_objectives(B):
     partition = dict(sorted(partition.items()))
 
     # choice target community
-    # community_list = [[0, 1, 2, 3], [2, 3, 4], [4], [0, 1, 2, 3, 4]]
-    # community_list = [[4], [0, 1, 2, 3], [2, 3, 4], [0, 1, 2, 3, 4]]
     community_list = [[4], [2, 3, 4], [0, 1, 2, 3, 4]]
     # community_list = [[0], [1], [2]]
 
@@ -136,14 +135,15 @@ def analyse_theta(p, B, D, K, L, G, H):
     s = (K + L.T).dot(In - G).dot(p)
     S = np.diag(s)
     Q = S + 1 / 2 * np.diag(p).dot(L.T).dot(In - G).dot(G + H)
-    r = ((B - D.T) + (K + L.T).dot(H)).dot(p)
+    Q = (Q.T + Q) / 2
+    r = ((B.T - D) + (K + L.T).dot(H)).dot(p)
 
     # define constraint in theorem 1
-    if np.all(Q):
-        constranit_theta = [x @ Q @ x - r.T @ x <= 0,
+    if np.all(Q == 0):
+        constranit_theta = [- r.T @ x <= 0,
                             0 <= x, x <= 1]
     else:
-        constranit_theta = [- r.T @ x <= 0,
+        constranit_theta = [cp.quad_form(x, Q) - r.T @ x <= 0,
                             0 <= x, x <= 1]
 
     # define objective function in theorem 1
@@ -151,7 +151,7 @@ def analyse_theta(p, B, D, K, L, G, H):
 
     # solve program of theorem 1 and caluculate theta*
     prob_theta = cp.Problem(cp.Maximize(theta), constranit_theta)
-    prob_theta.solve()
+    prob_theta.solve(solver=cp.MOSEK)
 
     return prob_theta.value
 
@@ -342,10 +342,10 @@ def event_trigger_func(x, xk, sigma, eta):
         return 0
 
 
-def plot_data(K, L, sigma, eta, M, d_table, choice):
+def plot_data(p, K, L, sigma, eta, M, d_table, choice):
     # define time and gap
     Time = 50000
-    h = 0.000025
+    h = 0.000035
 
     # define propotion of infected pepole
     x = np.zeros([Time, n])
@@ -359,18 +359,17 @@ def plot_data(K, L, sigma, eta, M, d_table, choice):
     d_table_list = np.array([d_table for i in range(Time)])
     u_transition = np.zeros([Time - 1, n])
     v_transition = np.zeros([Time - 1, n])
-
     # collect transition data of propotion of infected pepole and triggerring event
     for k in range(Time - 1):
-        for i in range(n):
 
-            # # choice 1 has no control input
-            if choice == 1:
-                x[k + 1] = x[k] + h * \
-                    (-D.dot(x[k]) + (In - np.diag(x[k])).dot(B.T).dot(x[k]))
+        # # choice 1 has no control input
+        if choice == 1:
+            x[k + 1] = x[k] + h * \
+                (-D.dot(x[k]) + (In - np.diag(x[k])).dot(B.T).dot(x[k]))
 
-            # # In the case of using feedback controller
-            else:
+        # # In the case of using feedback controller
+        else:
+            for i in range(n):
                 # # choice 2 is the case of continuous controller
                 if choice == 2 and event_trigger_func(x[k][i], xk[i], 0, 0) == 1:
                     xk[i] = x[k][i]
@@ -380,54 +379,75 @@ def plot_data(K, L, sigma, eta, M, d_table, choice):
                 elif choice == 3 and event_trigger_func(x[k][i], xk[i], sigma[i], eta[i]) == 1:
                     xk[i] = x[k][i]
                     event[k + 1][i] = 1
-                x[k + 1] = x[k] + h * (-(D + K.dot(np.diag(xk))).dot(x[k]) + (
-                    In - np.diag(x[k])).dot(B.T - L.dot(np.diag(xk).T)).dot(x[k]))
-                u_transition[k] = K.dot(xk)
-                v_transition[k] = L.dot(xk)
+            x[k + 1] = x[k] + h * (-(D + K.dot(np.diag(xk))).dot(x[k]) + (
+                In - np.diag(x[k])).dot(B.T - L.dot(np.diag(xk).T)).dot(x[k]))
+            u_transition[k] = K.dot(xk)
+            v_transition[k] = L.dot(xk)
 
     # plot data
     # # subplot 1 is the transition data of x
     fig, ax = plt.subplots(figsize=(16, 9.7))
     for i in range(n):
-        ax.plot(x.T[i], lw=1)
-
-    # colors = ['navy', 'deepskyblue', 'magenta', 'darkgreen']
-    colors = ['navy', 'magenta', 'darkgreen']
-
-    for m in range(M):
-        x_com_ave = 0
-        community_member_num = 0
-        for i in range(n):
-            if W[m][i] == 1:
-                x_com_ave += x.T[i]
-                community_member_num += 1
-        ax.plot(x_com_ave / community_member_num, linestyle="dashdot",
-                lw=5, label='Average in Community {}'.format(m + 1), color=colors[m])
-
-    ax.plot(d_table_list.T[0], lw=4, linestyle="dotted",
-            label=r'$\bar{x}_1 = 0.10$,   Threshold for Community 1', color=colors[0])
-    ax.plot(d_table_list.T[1], lw=4, linestyle="dotted",
-            label=r'$\bar{x}_2 = 0.085$, Threshold for Community 2', color=colors[1])
-    ax.plot(d_table_list.T[2], lw=4, linestyle="dotted",
-            label=r'$\bar{x}_3 = 0.070$, Threshold for Community 3', color=colors[2])
-    # ax.plot(d_table_list.T[3], lw=4, linestyle="dotted",
-    #         label=r'$\bar{x}_4 = 0.07$, Threshold for Community 4', color=colors[3])
+        ax.plot(x.T[i], lw=2)
 
     # # # plot setting
-    plt.xlabel(r'Time $[t]$', fontsize=45)
-    plt.ylabel(r'$x_i(t)$', fontsize=45)
+    plt.xlabel(r'$t$', fontsize=60)
+    plt.ylabel(
+        r'$x_i(t)$', fontsize=60)
     # plt.title(r'Transition of $x$', fontsize=25)
-    ax.xaxis.offsetText.set_fontsize(45)
+    ax.xaxis.offsetText.set_fontsize(60)
     ax.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
-    plt.setp(ax.get_xticklabels(), fontsize=40)
-    plt.yticks([0.0, 0.2, 0.4, 0.6, 0.8, 1.0], fontsize=45)
-    plt.legend(loc="upper right", bbox_to_anchor=(1.0, 1.0),
-               borderaxespad=0, fontsize=35)
+    plt.setp(ax.get_xticklabels(), fontsize=60)
+    plt.yticks([0.0, 0.2, 0.4, 0.6, 0.8, 1.0], fontsize=60)
     plt.tight_layout()
     plt.grid()
     # plt.savefig("./images/transition_of_x_noinput.png", dpi=300)
-    plt.savefig("./images/transition_of_x_allnodes.pdf", dpi=300)
-    '''
+    plt.savefig("./images/transition_of_x_noinput.pdf", dpi=300)
+
+
+if __name__ == '__main__':
+    # define control objectives according to network
+    W, M, d_table, d = create_control_objectives(B)
+
+    # design Lyapunov parameter
+    p, rc = lyapunov_param_solver(B, D)
+
+    # analyse thetastar in the case of no input
+    thetastar_noinput = analyse_theta(p, B, D, On, On, On, On)
+
+    # judge whether control objectives can be achieve in the case of no control input
+    p_min = p_min_supp_w(p, W, M)
+    judge_noinput = [thetastar_noinput <= d[m] * p_min[m] for m in range(M)]
+    # print([d[m] * p_min[m] for m in range(M)])
+
+    # design event-triggered controller
+    if np.all(judge_noinput):
+        print('Control objectives can be achieved without control inputs.')
+    else:
+        # design control paramters
+        K, L = control_parameter_solver_gp(p, rc, W, M, d)
+
+        # design triggered prapeters
+        sigma, eta = triggered_parameter_solver_gp(p, rc, K, L, W, M, d)
+
+        # print(analyse_theta(p, B, D, K, L, np.diag(sigma), np.diag(eta)))
+
+        # print parameter info
+        data_info(p, K, L, sigma, eta, W, M, d_table)
+
+        # plot data
+        plot_data(p, K, L, sigma, eta, M, d_table, choice=1)
+
+        # save paramter of sevent-triggered controllers
+        np.save('data/matrix/D', D)
+        np.save('data/matrix/B', B)
+        np.save('data/matrix/K', K)
+        np.save('data/matrix/L', L)
+        np.save('data/matrix/sigma', sigma)
+        np.save('data/matrix/eta', eta)
+        np.save('data/matrix/p', p)
+
+'''
     # # subplot 2 is the transition data of triggerring event
     if choice == 2 or choice == 3:
         fig, ax = plt.subplots(figsize=(16, 9.7))
@@ -481,41 +501,28 @@ def plot_data(K, L, sigma, eta, M, d_table, choice):
             "./images/transition_of_control_input_of_infection_rate.png", dpi=300)
     '''
 
-if __name__ == '__main__':
-    # define control objectives according to network
-    W, M, d_table, d = create_control_objectives(B)
+# plt.yticks(fontsize=45)
+# plt.ylim(0.05, 0.5)
+# plt.legend(loc="upper right", bbox_to_anchor=(1.0, 1.0),
+#           borderaxespad=0, fontsize=50)
+# colors = ['navy', 'deepskyblue', 'magenta', 'darkgreen']
+colors = ['navy', 'gold', 'hotpink']
+'''
+    x_com_ave = 0
+    community_member_num = 0
+    for i in range(n):
+        if W[0][i] == 1:
+            x_com_ave += x.T[i]
+            community_member_num += 1
+    ax.plot(x_com_ave / community_member_num, linestyle="solid",
+            lw=7, color='deeppink')
+    '''
 
-    # design Lyapunov parameter
-    p, rc = lyapunov_param_solver(B, D)
-
-    # analyse thetastar in the case of no input
-    thetastar_noinput = analyse_theta(p, B, D, On, On, On, On)
-    print(thetastar_noinput)
-
-    # judge whether control objectives can be achieve in the case of no control input
-    p_min = p_min_supp_w(p, W, M)
-    judge_noinput = [thetastar_noinput <= d[m] * p_min[m] for m in range(M)]
-
-    # design event-triggered controller
-    if np.all(judge_noinput):
-        print('Control objectives can be achieved without control inputs.')
-    else:
-        # design control paramters
-        K, L = control_parameter_solver_gp(p, rc, W, M, d)
-
-        # design triggered prapeters
-        sigma, eta = triggered_parameter_solver_gp(p, rc, K, L, W, M, d)
-
-        print(analyse_theta(p, B, D, K, L, np.diag(sigma), np.diag(eta)))
-
-        # print parameter info
-        data_info(p, K, L, sigma, eta, W, M, d_table)
-
-        # plot data
-        plot_data(K, L, sigma, eta, M, d_table, choice=3)
-
-        # save paramter of sevent-triggered controllers
-        np.save('data/matrix/K', K)
-        np.save('data/matrix/L', L)
-        np.save('data/matrix/sigma', sigma)
-        np.save('data/matrix/eta', eta)
+# ax.plot(d_table_list.T[0], lw=6, linestyle="dashdot",
+#         label=r'$\bar{x}_1 = 0.10$', color=colors[0])
+# ax.plot(d_table_list.T[1], lw=6, linestyle="dashdot",
+#         label=r'$\bar{x}_2 = 0.085$', color=colors[1])
+# ax.plot(d_table_list.T[2], lw=6, linestyle="dashdot",
+#         label=r'$\bar{x}_3 = 0.070$', color=colors[2])
+# ax.plot(d_table_list.T[3], lw=4, linestyle="dotted",
+#         label=r'$\bar{x}_4 = 0.07$, Threshold for Community 4', color=colors[3])

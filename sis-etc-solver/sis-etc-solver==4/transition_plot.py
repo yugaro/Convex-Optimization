@@ -1,6 +1,6 @@
 import math
 import numpy as np
-import pandas as pd
+# import pandas as pd
 import matplotlib as mpl
 from matplotlib import pyplot as plt
 from matplotlib import rc
@@ -23,16 +23,6 @@ epsilon = 1e-15
 In = np.identity(n)
 On = np.zeros((n, n))
 
-# matrix of recovery rates
-D_base_max = 1.8
-D_base_min = 1.5
-D = np.diag(np.sort((D_base_max - D_base_min) *
-                    np.random.rand(n) + D_base_min)[::-1])
-
-# matrix of infection rates (air route matrix in case of the passengers and flights)
-B = pd.read_csv('./data/US_Airport_Ad_Matrix.csv',
-                index_col=0, nrows=n, usecols=[i for i in range(n + 1)]).values
-
 
 def create_control_objectives(B):
     # define weighted multi-directed graph
@@ -49,14 +39,17 @@ def create_control_objectives(B):
     partition = dict(sorted(partition.items()))
 
     # choice target community
-    community_list = [[0, 1, 2, 3], [2, 3, 4], [4], [0, 1, 2, 3, 4, 5]]
+    # community_list = [[0, 1, 2, 3], [2, 3, 4], [4], [0, 1, 2, 3, 4]]
+    # community_list = [[4], [0, 1, 2, 3], [2, 3, 4], [0, 1, 2, 3, 4]]
+    community_list = [[4], [2, 3, 4], [0, 1, 2, 3, 4]]
     # community_list = [[0], [1], [2]]
 
     # count the numbers of control objective
     M = len(community_list)
 
     # define threshold of each node in the target
-    d_table = np.array([0.09, 0.08, 0.1, 0.07])
+    # d_table = np.array([0.1, 0.09, 0.08, 0.07])
+    d_table = np.array([0.1, 0.085, 0.07])
     # d_table = np.array([0.1, 0.1, 0.1])
 
     # define target nodes according to community
@@ -87,7 +80,7 @@ def event_trigger_func(x, xk, sigma, eta):
 def plot_data_community(K, L, sigma, eta, W, M, d_table, community_part):
     # define time and gap
     Time = 50000
-    h = 0.00005
+    h = 0.000035
 
     # define propotion of infected pepole
     # x_noinput = np.zeros([Time, n])
@@ -115,29 +108,129 @@ def plot_data_community(K, L, sigma, eta, W, M, d_table, community_part):
     # collect transition data of propotion of infected pepole and triggerring event
     for k in range(Time - 1):
         for i in range(n):
-            # # no control input
-            # x_noinput[k + 1] = x_noinput[k] + h * (-D.dot(x_noinput[k]) + (
-            #     In - np.diag(x_noinput[k])).dot(B.T).dot(x_noinput[k]))
-
-            # # feedback control
-            # x_feedback[k + 1] = x_feedback[k] + h * (-(D + K.dot(np.diag(x_feedback[k]))).dot(x_feedback[k]) + (
-            #     In - np.diag(x_feedback[k])).dot(B.T - L.dot(np.diag(x_feedback[k]).T)).dot(x_feedback[k]))
-            # # # record feedback control input
-            # u_transition_feedback[k] = K.dot(x_feedback[k])
-            # v_transition_feedback[k] = L.dot(x_feedback[k])
-
             # # event-triggered control
             if event_trigger_func(x_event[k][i], xk[i], sigma[i], eta[i]) == 1:
                 xk[i] = x_event[k][i]
                 event[k + 1][i] = 1
-            x_event[k + 1] = x_event[k] + h * (-(D + K.dot(np.diag(xk))).dot(x_event[k]) + (
-                In - np.diag(x_event[k])).dot(B.T - L.dot(np.diag(xk).T)).dot(x_event[k]))
-
             v_transition_event[k][i] = L[i] * xk
+        x_event[k + 1] = x_event[k] + h * (-(D + K.dot(np.diag(xk))).dot(x_event[k]) + (
+            In - np.diag(x_event[k])).dot(B.T - L.dot(np.diag(xk).T)).dot(x_event[k]))
         # # # record event-triggered control input
         u_transition_event[k] = K.dot(xk)
 
     v_argmax = np.argmax(v_transition_event[0], axis=0)
+
+    # # subplot 2 is the transition data of triggerring event
+    color_map = ['darkred', 'red', 'darkorange', 'orange',
+                 'gold', 'darkgreen', 'green',
+                 'darkcyan', 'cyan', 'deepskyblue', 'navy', 'darkviolet',
+                 'magenta', 'olive', 'lightskyblue', 'lime',
+                 'crimson', 'peachpuff', 'mediumspringgreen', 'cornflowerblue']
+    '''
+    fig, ax = plt.subplots(figsize=(16, 9.7))
+    color_num = 0
+    for i in reversed(range(n)):
+        if W[community_part][i] == 1:
+            ax.plot(event.T[i], lw=4, color=color_map[color_num], alpha=1)
+            color_num += 1
+    # # # plot setting
+    plt.xlabel(r'Time $[t]$', fontsize=45)
+    plt.ylabel('Triggering Event in Community 1', fontsize=45)
+    # plt.title('Transition of Triggering Event', fontsize=25)
+    ax.xaxis.offsetText.set_fontsize(45)
+    ax.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
+    plt.setp(ax.get_xticklabels(), fontsize=45)
+    plt.yticks([0, 1], fontsize=45)
+    plt.tight_layout()
+    plt.grid()
+    plt.savefig("./images/triggering_event.pdf", dpi=300)
+    '''
+
+    # # subplot 5 is the transition data of U (event)
+    fig, ax = plt.subplots(figsize=(16, 9.7))
+    color_num = 0
+    for i in reversed(range(n)):
+        if W[community_part][i] == 1:
+            ax.plot(u_transition_event.T[i] / (10 * D_base_max),
+                    lw=4, color=color_map[color_num], alpha=1)
+            color_num += 1
+    # # # plot setting
+    plt.xlabel(r'$t$', fontsize=60)
+    plt.ylabel(
+        r'$u_i(t),$ for $i\in\mathcal{V}_1$', fontsize=60)
+    # plt.title(
+    #    r'Transition of Event-Triggered Control Input of Recovery Rate $(U)$', fontsize=25)
+    ax.xaxis.offsetText.set_fontsize(60)
+    ax.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
+    plt.setp(ax.get_xticklabels(), fontsize=60)
+    plt.yticks([0, 0.04, 0.08, 0.12, 0.16])
+    ax.yaxis.offsetText.set_fontsize(60)
+    ax.ticklabel_format(style='sci', axis='y', scilimits=(0, 0))
+    plt.setp(ax.get_yticklabels(), fontsize=60)
+    plt.ylim(0, 0.18)
+    plt.tight_layout()
+    plt.grid()
+    plt.savefig(
+        "./images/control_input_of_recovery_rate.pdf", dpi=300)
+
+    # subplot 6 is the transition data of V (event)
+    fig, ax = plt.subplots(figsize=(16, 9.7))
+    color_num = 0
+    for i in reversed(range(n)):
+        if W[community_part][i] == 1:
+            ax.plot(v_transition_event.T[i]
+                    [v_argmax[i]] / (10 * D_base_max), lw=4, color=color_map[color_num], alpha=1)
+            color_num += 1
+            # for j in range(n):
+            #    if B[i][j] != 0:
+            #        ax.plot(v_transition_event.T[i][j] / (10 * D_base_max), lw=2)
+    # # # plot setting
+    plt.xlabel(r'$t$', fontsize=60)
+    plt.ylabel(
+        r'$v_{ij}(t),$ for $i\in\mathcal{V}_1$', fontsize=60)
+    # plt.title(
+    #    r'Transition of Event-Triggered Control Input of Infection Rate $(V)$', fontsize=25)
+    ax.xaxis.offsetText.set_fontsize(60)
+    ax.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
+    plt.setp(ax.get_xticklabels(), fontsize=60)
+    # plt.yticks(fontsize=50)
+    ax.yaxis.offsetText.set_fontsize(60)
+    ax.ticklabel_format(style='sci', axis='y', scilimits=(0, 0))
+    plt.setp(ax.get_yticklabels(), fontsize=60)
+    plt.ylim(0, 0.011)
+    plt.tight_layout()
+    plt.grid()
+    plt.savefig(
+        "./images/control_input_of_infection_rate.pdf", dpi=300)
+
+
+if __name__ == "__main__":
+    # load parameters of the event-triggered controller
+    D_base_max = 1.8
+    D = np.load('./data/matrix/D.npy')
+    B = np.load('./data/matrix/B.npy')
+    K = np.load('./data/matrix/K.npy')
+    L = np.load('./data/matrix/L.npy')
+    sigma = np.load('./data/matrix/sigma.npy')
+    eta = np.load('./data/matrix/eta.npy')
+
+    # define control objectives according to network
+    W, M, d_table, d = create_control_objectives(B)
+
+    # plot data
+    plot_data_community(K, L, sigma, eta, W, M, d_table, community_part=0)
+
+    # # no control input
+    # x_noinput[k + 1] = x_noinput[k] + h * (-D.dot(x_noinput[k]) + (
+    #     In - np.diag(x_noinput[k])).dot(B.T).dot(x_noinput[k]))
+
+    # # feedback control
+    # x_feedback[k + 1] = x_feedback[k] + h * (-(D + K.dot(np.diag(x_feedback[k]))).dot(x_feedback[k]) + (
+    #     In - np.diag(x_feedback[k])).dot(B.T - L.dot(np.diag(x_feedback[k]).T)).dot(x_feedback[k]))
+    # # # record feedback control input
+    # u_transition_feedback[k] = K.dot(x_feedback[k])
+    # v_transition_feedback[k] = L.dot(x_feedback[k])
+
     '''
     # caltulate average state transition of targert community
     x_noinput_com_ave = 0
@@ -166,7 +259,7 @@ def plot_data_community(K, L, sigma, eta, W, M, d_table, community_part):
     # # # plot setting
     plt.xlabel(r'Time $[t]$', fontsize=25)
     plt.ylabel(
-        r'Average in Community1 $\sum_{i\in {\rm supp}(w_1)}x_i$', fontsize=25)
+        r'Average in Community1 $sum_{i in {\rm supp}(w_1)}x_i$', fontsize=25)
     # plt.title(r'Transition of $x$', fontsize=25)
     ax.xaxis.offsetText.set_fontsize(25)
     ax.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
@@ -179,23 +272,6 @@ def plot_data_community(K, L, sigma, eta, W, M, d_table, community_part):
                borderaxespad=0, fontsize=20)
     plt.savefig("./images/transition_of_x_community.png", dpi=300)
     '''
-
-    # # subplot 2 is the transition data of triggerring event
-    fig, ax = plt.subplots(figsize=(16, 9.7))
-    for i in range(n):
-        if W[community_part][i] == 1:
-            ax.plot(event.T[i], lw=3)
-    # # # plot setting
-    plt.xlabel(r'Time $[t]$', fontsize=45)
-    plt.ylabel('Triggering Event in Community 1', fontsize=45)
-    # plt.title('Transition of Triggering Event', fontsize=25)
-    ax.xaxis.offsetText.set_fontsize(45)
-    ax.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
-    plt.setp(ax.get_xticklabels(), fontsize=45)
-    plt.yticks([0, 1], fontsize=45)
-    plt.tight_layout()
-    plt.grid()
-    plt.savefig("./images/triggering_event_community.pdf", dpi=300)
 
     '''
     # # subplot 3 is the transition data of U (continuous)
@@ -236,62 +312,3 @@ def plot_data_community(K, L, sigma, eta, W, M, d_table, community_part):
     plt.savefig(
         "./images/transition_of_continuous_control_input_of_infection_rate_community.png", dpi=300)
     '''
-
-    # # subplot 5 is the transition data of U (event)
-    fig, ax = plt.subplots(figsize=(16, 9.7))
-    for i in range(n):
-        if W[community_part][i] == 1:
-            ax.plot(u_transition_event.T[i] / (10 * D_base_max), lw=3)
-    # # # plot setting
-    plt.xlabel(r'Time $[t]$', fontsize=45)
-    plt.ylabel(
-        r'$u_i(t)$ in Community 1', fontsize=45)
-    # plt.title(
-    #    r'Transition of Event-Triggered Control Input of Recovery Rate $(U)$', fontsize=25)
-    ax.xaxis.offsetText.set_fontsize(45)
-    ax.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
-    plt.setp(ax.get_xticklabels(), fontsize=45)
-    plt.yticks(fontsize=45)
-    ax.set_yticks([0.02, 0.06, 0.10, 0.14, 0.18])
-    plt.tight_layout()
-    plt.grid()
-    plt.savefig(
-        "./images/transition_of_event-triggered_control_input_of_recovery_rate_community_test.pdf", dpi=300)
-
-    # subplot 6 is the transition data of V (event)
-    fig, ax = plt.subplots(figsize=(16, 9.7))
-    for i in range(n):
-        if W[community_part][i] == 1:
-            ax.plot(v_transition_event.T[i]
-                    [v_argmax[i]] / (10 * D_base_max), lw=3)
-            # for j in range(n):
-            #    if B[i][j] != 0:
-            #        ax.plot(v_transition_event.T[i][j] / (10 * D_base_max), lw=2)
-    # # # plot setting
-    plt.xlabel(r'Time $[t]$', fontsize=45)
-    plt.ylabel(
-        r'$v_{ij}(t)$ in Community 1', fontsize=45)
-    # plt.title(
-    #    r'Transition of Event-Triggered Control Input of Infection Rate $(V)$', fontsize=25)
-    ax.xaxis.offsetText.set_fontsize(45)
-    ax.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
-    plt.setp(ax.get_xticklabels(), fontsize=45)
-    plt.yticks(fontsize=45)
-    plt.tight_layout()
-    plt.grid()
-    plt.savefig(
-        "./images/transition_of_event-triggered_control_input_of_infection_rate_community_test.pdf", dpi=300)
-
-
-if __name__ == "__main__":
-    # define control objectives according to network
-    W, M, d_table, d = create_control_objectives(B)
-
-    # load parameters of the event-triggered controller
-    K = np.load('./data/matrix/K.npy')
-    L = np.load('./data/matrix/L.npy')
-    sigma = np.load('./data/matrix/sigma.npy')
-    eta = np.load('./data/matrix/eta.npy')
-
-    # plot data
-    plot_data_community(K, L, sigma, eta, W, M, d_table, community_part=2)

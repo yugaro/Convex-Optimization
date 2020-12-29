@@ -41,7 +41,7 @@ def lyapunov_param_solver(B, D):
                        max_iter=500,)
 
     # define target vector
-    target = (B - D).dot(np.ones(n)) * 0.001
+    target = (B - D).dot(np.ones(n)) * 1
     # print(target)
 
     # model fitting
@@ -50,8 +50,6 @@ def lyapunov_param_solver(B, D):
     # calculate Lyapunov param
     p = mlp.predict(B - D).dot(np.linalg.inv(B - D))
 
-    print(p)
-
     # add bias and implement normalization
     # p += np.abs(p.min()) + 1
     p /= np.linalg.norm(p)
@@ -59,8 +57,52 @@ def lyapunov_param_solver(B, D):
     # caluculate rc
     rc = (B.T - D).dot(p)
 
-    print(mlp.score(B - D, target))
+    return p, rc
 
+def lyapunov_param_solver2(B, D):
+    p_v = cp.Variable(n)
+    rc_v = cp.Variable(n)
+
+    lyapunov_cons1 = [rc_v == (B - D) @ p_v]
+    lyapunov_cons2 = [p_v[i] >= 0.00000000001 for i in range(n)]
+
+    lyapunov_constraints = lyapunov_cons1 + lyapunov_cons2
+
+    f_ly = 0
+    for i in range(n):
+        f_ly += cp.pos(rc_v[i])
+
+    prob_lyapunov = cp.Problem(cp.Minimize(f_ly), lyapunov_constraints)
+    prob_lyapunov.solve(solver=cp.MOSEK)
+
+    p = np.array(p_v.value)
+    rc = np.array(rc_v.value)
+    p = p / np.linalg.norm(p, 2)
+    rc = rc / np.linalg.norm(p, 2)
+    return p, rc
+
+
+def lyapunov_param_solver3(B, D):
+    p_v = cp.Variable(n, pos=True)
+    rc_v = cp.Variable(n)
+
+    lyapunov_cons1 = [rc_v == (B - D) @ p_v]
+    lyapunov_cons2 = [p_v[i] >= 0.0000001 for i in range(n)]
+    # lyapunov_constraints = lyapunov_cons1
+    # lyapunov_constraints = lyapunov_cons2
+    lyapunov_constraints = lyapunov_cons1 + lyapunov_cons2
+
+    f_ly = 0
+    for i in range(n):
+        f_ly += cp.logistic(rc_v[i])
+
+    prob_lyapunov = cp.Problem(cp.Minimize(f_ly), lyapunov_constraints)
+    prob_lyapunov.solve(solver=cp.MOSEK)
+
+    p = np.array(p_v.value)
+    rc = np.array(rc_v.value)
+    p = p / np.linalg.norm(p, 2)
+    rc = rc / np.linalg.norm(p, 2)
     return p, rc
 
 
@@ -72,14 +114,15 @@ def analyse_theta(p, B, D, K, L, G, H):
     s = (K + L.T).dot(In - G).dot(p)
     S = np.diag(s)
     Q = S + 1 / 2 * np.diag(p).dot(L.T).dot(In - G).dot(G + H)
-    r = ((B - D.T) + (K + L.T).dot(H)).dot(p)
+    Q = (Q.T + Q) / 2
+    r = ((B.T - D) + (K + L.T).dot(H)).dot(p)
 
     # define constraint in theorem 1
-    if np.all(Q):
-        constranit_theta = [x @ Q @ x - r.T @ x <= 0,
+    if np.all(Q == 0):
+        constranit_theta = [- r.T @ x <= 0,
                             0 <= x, x <= 1]
     else:
-        constranit_theta = [- r.T @ x <= 0,
+        constranit_theta = [cp.quad_form(x, Q) - r.T @ x <= 0,
                             0 <= x, x <= 1]
 
     # define objective function in theorem 1
@@ -87,16 +130,24 @@ def analyse_theta(p, B, D, K, L, G, H):
 
     # solve program of theorem 1 and caluculate theta*
     prob_theta = cp.Problem(cp.Maximize(theta), constranit_theta)
-    prob_theta.solve()
+    prob_theta.solve(solver=cp.MOSEK)
 
     return prob_theta.value
-
 
 if __name__ == '__main__':
 
     # design Lyapunov parameter
-    p, rc = lyapunov_param_solver(B, D)
+    # p, rc = lyapunov_param_solver(B, D)
+    # p, rc = lyapunov_param_solver2(B, D)
+    p, rc = lyapunov_param_solver3(B, D)
     print(p)
-    print(p.dot(B - D))
+    # load data
+    # D = np.load('./data/matrix/D.npy')
+    # B = np.load('./data/matrix/B.npy')
+    # K = np.load('./data/matrix/K.npy')
+    # L = np.load('./data/matrix/L.npy')
+    # sigma = np.load('./data/matrix/sigma.npy')
+    # eta = np.load('./data/matrix/eta.npy')
+
     theta = analyse_theta(p, B, D, On, On, On, On)
     print(theta)

@@ -28,14 +28,14 @@ node_size = np.array([(size ** 4)
                       for size in list(eigv_cent.values())]) * 20000000
 
 # define node color
-partition = community.best_partition(G, weight='weight', resolution=0.85)
+partition = community.best_partition(G, weight='weight', resolution=1)
 node_color = [partition[i] for i in G.nodes()]
 
 # 0:R, 1:O , 2:Y, 3:L, 4:B
 
 # define edge width
 width = np.array([d['weight'] for (u, v, d) in G.edges(data=True)])
-width_std = 10 * (((width - min(width)) / (max(width) - min(width)))) - 0.005
+width_std = 14 * (((width - min(width)) / (max(width) - min(width)))) + 0.5
 
 # define label name
 node_labels = {i: key for i, key in zip(np.array(range(n)), list(df_B.index))}
@@ -69,8 +69,4 @@ nx.draw_networkx_edges(
 )
 
 plt.gca().set_axis_off()
-plt.savefig('./images/SIS_env_plot.pdf', format="pdf")
-
-# G2 = nx.nx_agraph.to_agraph(G)
-# G2.draw(path='test.svg', prog="neato")
-# nx.nx_agraph.to_agraph(G).draw("./sample.svg", prog="fdp", format="svg")
+plt.savefig('./images/air_transport_network.png')
